@@ -1,22 +1,35 @@
 #!/bin/bash
-drive="/dev/sda"
+drive="/dev/"$(lsblk -S | awk {'print $1'} | sed -n '2 p')
 sfdisk $drive -f -X gpt << EOF
-,+512M,ef,*
+,+512M,uefi,*
 ;
 EOF
 mkfs.fat -F32 $drive"1"
 fatlabel $drive"1" BOOT
-mkfs.btrfs -L -f ROOT $drive"2"
-btrfs subvolume create /mnt/sda2
-mount $drive"2" /mnt/sda2
-mkdir /mnt/sda2/boot
-mount $drive"1" /mnt/sda2/boot
+mkfs.btrfs -L ROOT $drive"2"
+mount $drive"2" /mnt
+btrfs su cr /mnt/@
+btrfs su cr /mnt/@home
+btrfs su cr /mnt/@var
+btrfs su cr /mnt/@opt
+btrfs su cr /mnt/@tmp
+btrfs su cr /mnt/@.snapshots
+umount /mnt
+mount -o noatime,commit=120,compress=zstd,space_cache,subvol=@ $drive"2" /mnt
+mkdir /mnt/{boot,home,var,opt,tmp,.snapshots}
+mount -o noatime,commit=120,compress=zstd,space_cache,subvol=@home $drive"2" /mnt/home
+mount -o noatime,commit=120,compress=zstd,space_cache,subvol=@opt $drive"2" /mnt/opt
+mount -o noatime,commit=120,compress=zstd,space_cache,subvol=@tmp $drive"2" /mnt/tmp
+mount -o noatime,commit=120,compress=zstd,space_cache,subvol=@.snapshots $drive"2" /mnt/.snapshots
+mount -o subvol=@var $drive"2" /mnt/var
+mkdir /mnt/boot
+mount $drive"1" /mnt/boot
 
-basestrap /mnt/sda2 linux-zen linux-firmware base base-devel dinit elogind-dinit
+basestrap /mnt linux-zen linux-firmware base base-devel dinit elogind-dinit btrfs-progs
 
-fstabgen -U /mnt/sda2 >> /mnt/sda2/etc/fstab
+fstabgen -U /mnt >> /mnt/etc/fstab
 
-artix-chroot /mnt/sda2 /bin/bash << EOF
+artix-chroot /mnt /bin/bash << EOF
 $hostname="osisa"
 $username="user"
 $password="setup"
@@ -34,15 +47,26 @@ locale-gen
 echo "LANG="$language > /etc/locale.conf
 echo $hostname > /etc/hostname
 
+pacman -S --noconfirm --noprogressbar artix-archlinux-support
+echo -e "
+[extra]
+Include = /etc/pacman.d/mirrorlist-arch
+[community]
+Include = /etc/pacman.d/mirrorlist-arch
+" >> /etc/pacman.conf
+pacman-key --populate archlinux
+
 pacman -Syyu
-pacman -S --noconfirm --noprogressbar grub efibootmgr os-prober neofetch htop openssh git ufw
+pacman -S --noconfirm --noprogressbar grub grub-btrfs efibootmgr os-prober linux-headers dialog dialog dosfstools neofetch htop git xdg-utils xdg-user-dirs
 sed -i '/Color/s/^#//g' /etc/pacman.conf
+echo "MODULES=(btrfs)" >> /etc/mkinitcpio.conf
+mkinitcpio -p linux-zen
 
 sed -i "s/TIMEOUT=5/TIMEOUT=0/g" /etc/default/grub
 sed -i "s/TIMEOUT_STYLE=menu/TIMEOUT_STYLE=hidden/g" /etc/default/grub
 sed -i "s/="loglevel=3 quiet"/="loglevel=0 quiet splash"/g" /etc/default/grub
 mkdir /boot/grub
-grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB
+grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=Linux
 #mount /dev/OTHER_OS
 grub-mkconfig -o /boot/grub/grub.cfg
 
@@ -57,9 +81,9 @@ sed -i "s/root:x:0:0:root:\/root:\/bin\/bash/root:x:0:0:root:\/root:\/sbin\/nolo
 echo -e $password"\n"$password | passwd $username
 
 echo "127.0.0.1\t\tlocalhost\n::1\t\tlocalhost\n127.0.1.1\t\"$hostname".local "$hostname > /etc/hosts
-pacman -S --noconfirm dhcpcd connman-dinit connman-gtk wpa_supplicant bluez openvpn
+pacman -S --noconfirm dhcpcd connman-dinit connman-gtk wpa_supplicant bluez openvpn openssh ufw cups xdg
 ln -s ../connmand /etc/dinit.d/boot.d/
 exit
 EOF
-umount -R /mnt
-reboot
+umount -l /mnt
+echo "DONE"
