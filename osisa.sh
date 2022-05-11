@@ -43,7 +43,7 @@ sed -i "s/TIMEOUT_STYLE=menu/TIMEOUT_STYLE=hidden/g" /etc/default/grub
 sed -i "s/="loglevel=3 quiet"/="loglevel=0 quiet splash"/g" /etc/default/grub
 mkdir /boot/grub
 grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB
-#mount /dev/OTHER_OSs
+#mount /dev/OTHER_OS
 grub-mkconfig -o /boot/grub/grub.cfg
 
 if grep -q "Intel" <<< $(cat /proc/cpuinfo | grep "vendor" ); then $cpu="intel"; fi
